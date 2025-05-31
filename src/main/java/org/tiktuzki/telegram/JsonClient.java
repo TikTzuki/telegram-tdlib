@@ -14,10 +14,10 @@ import java.io.IOException;
 public final class JsonClient {
     static {
         try {
-//            System.loadLibrary("tdjsonjava");
-            JniLoader.loadTdLib();
-        } catch (UnsatisfiedLinkError | IOException e) {
-            e.printStackTrace();
+            System.loadLibrary("tdjni");
+//            JniLoader.loadTdLib();
+        } catch (Exception e) {
+            System.err.println("Native code library failed to load.\n" + e);
         }
     }
 

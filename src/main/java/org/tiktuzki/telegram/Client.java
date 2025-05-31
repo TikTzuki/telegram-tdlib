@@ -17,10 +17,10 @@ public final class Client {
     static {
         try {
 //            System.loadLibrary("tdjni");
-            JniLoader.loadTdLib();
-        } catch (UnsatisfiedLinkError | IOException e) {
-            System.err.println("Native code library failed to load.\n" + e);
-            e.printStackTrace();
+//            JniLoader.loadTdLib();
+            JniLoader.load();
+        } catch (Exception e) {
+            System.err.println("Native code library failed to load.\n" + e.getMessage());
         }
     }
 
