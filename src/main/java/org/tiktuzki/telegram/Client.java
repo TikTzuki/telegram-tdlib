@@ -6,7 +6,6 @@
 //
 package org.tiktuzki.telegram;
 
-import java.io.IOException;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicLong;
 
@@ -14,6 +13,13 @@ import java.util.concurrent.atomic.AtomicLong;
  * Main class for interaction with the TDLib.
  */
 public final class Client {
+    private static final ConcurrentHashMap<Integer, ExceptionHandler> defaultExceptionHandlers = new ConcurrentHashMap<Integer, ExceptionHandler>();
+    private static final ConcurrentHashMap<Integer, Handler> updateHandlers = new ConcurrentHashMap<Integer, Handler>();
+    private static final ConcurrentHashMap<Long, Handler> handlers = new ConcurrentHashMap<Long, Handler>();
+    private static final AtomicLong currentQueryId = new AtomicLong();
+    private static final AtomicLong clientCount = new AtomicLong();
+    private static final ResponseReceiver responseReceiver = new ResponseReceiver();
+
     static {
         try {
 //            System.loadLibrary("tdjni");
@@ -22,6 +28,111 @@ public final class Client {
         } catch (Exception e) {
             System.err.println("Native code library failed to load.\n" + e.getMessage());
         }
+    }
+
+    private final int nativeClientId;
+
+    private Client(ResultHandler updateHandler, ExceptionHandler updateExceptionHandler, ExceptionHandler defaultExceptionHandler) {
+        clientCount.incrementAndGet();
+        nativeClientId = createNativeClient();
+        if (updateHandler != null) {
+            updateHandlers.put(nativeClientId, new Handler(updateHandler, updateExceptionHandler));
+        }
+        if (defaultExceptionHandler != null) {
+            defaultExceptionHandlers.put(nativeClientId, defaultExceptionHandler);
+        }
+        send(new TdApi.GetOption("version"), null, null);
+    }
+
+    /**
+     * Synchronously executes a TDLib request. Only a few marked accordingly requests can be executed synchronously.
+     *
+     * @param query Object representing a query to the TDLib.
+     * @param <T>   Automatically deduced return type of the query.
+     * @return request result.
+     * @throws ExecutionException if query execution fails.
+     */
+    @SuppressWarnings("unchecked")
+    public static <T extends TdApi.Object> T execute(TdApi.Function<T> query) throws ExecutionException {
+        TdApi.Object object = nativeClientExecute(query);
+        if (object instanceof TdApi.Error) {
+            throw new ExecutionException((TdApi.Error) object);
+        }
+        return (T) object;
+    }
+
+    /**
+     * Creates new Client.
+     *
+     * @param updateHandler           Handler for incoming updates.
+     * @param updateExceptionHandler  Handler for exceptions thrown from updateHandler. If it is null, exceptions will be ignored.
+     * @param defaultExceptionHandler Default handler for exceptions thrown from all ResultHandler. If it is null, exceptions will be ignored.
+     * @return created Client
+     */
+    public static Client create(ResultHandler updateHandler, ExceptionHandler updateExceptionHandler, ExceptionHandler defaultExceptionHandler) {
+        Client client = new Client(updateHandler, updateExceptionHandler, defaultExceptionHandler);
+        synchronized (responseReceiver) {
+            if (!responseReceiver.isRun) {
+                responseReceiver.isRun = true;
+
+                Thread receiverThread = new Thread(responseReceiver, "TDLib thread");
+                receiverThread.setDaemon(true);
+                receiverThread.start();
+            }
+        }
+        return client;
+    }
+
+    /**
+     * Sets the handler for messages that are added to the internal TDLib log.
+     * None of the TDLib methods can be called from the callback.
+     *
+     * @param maxVerbosityLevel The maximum verbosity level of messages for which the callback will be called.
+     * @param logMessageHandler Handler for messages that are added to the internal TDLib log. Pass null to remove the handler.
+     */
+    public static void setLogMessageHandler(int maxVerbosityLevel, Client.LogMessageHandler logMessageHandler) {
+        nativeClientSetLogMessageHandler(maxVerbosityLevel, logMessageHandler);
+    }
+
+    private static native int createNativeClient();
+
+    private static native void nativeClientSend(int nativeClientId, long eventId, TdApi.Function function);
+
+    private static native int nativeClientReceive(int[] clientIds, long[] eventIds, TdApi.Object[] events, double timeout);
+
+    private static native TdApi.Object nativeClientExecute(TdApi.Function function);
+
+    private static native void nativeClientSetLogMessageHandler(int maxVerbosityLevel, LogMessageHandler logMessageHandler);
+
+    /**
+     * Sends a request to the TDLib.
+     *
+     * @param query            Object representing a query to the TDLib.
+     * @param resultHandler    Result handler with onResult method which will be called with result
+     *                         of the query or with TdApi.Error as parameter. If it is null, nothing
+     *                         will be called.
+     * @param exceptionHandler Exception handler with onException method which will be called on
+     *                         exception thrown from resultHandler. If it is null, then
+     *                         defaultExceptionHandler will be called.
+     */
+    public void send(TdApi.Function query, ResultHandler resultHandler, ExceptionHandler exceptionHandler) {
+        long queryId = currentQueryId.incrementAndGet();
+        if (resultHandler != null) {
+            handlers.put(queryId, new Handler(resultHandler, exceptionHandler));
+        }
+        nativeClientSend(nativeClientId, queryId, query);
+    }
+
+    /**
+     * Sends a request to the TDLib with an empty ExceptionHandler.
+     *
+     * @param query         Object representing a query to the TDLib.
+     * @param resultHandler Result handler with onResult method which will be called with result
+     *                      of the query or with TdApi.Error as parameter. If it is null, then
+     *                      defaultExceptionHandler will be called.
+     */
+    public void send(TdApi.Function query, ResultHandler resultHandler) {
+        send(query, resultHandler, null);
     }
 
     /**
@@ -83,88 +194,11 @@ public final class Client {
         }
     }
 
-    /**
-     * Sends a request to the TDLib.
-     *
-     * @param query            Object representing a query to the TDLib.
-     * @param resultHandler    Result handler with onResult method which will be called with result
-     *                         of the query or with TdApi.Error as parameter. If it is null, nothing
-     *                         will be called.
-     * @param exceptionHandler Exception handler with onException method which will be called on
-     *                         exception thrown from resultHandler. If it is null, then
-     *                         defaultExceptionHandler will be called.
-     */
-    public void send(TdApi.Function query, ResultHandler resultHandler, ExceptionHandler exceptionHandler) {
-        long queryId = currentQueryId.incrementAndGet();
-        if (resultHandler != null) {
-            handlers.put(queryId, new Handler(resultHandler, exceptionHandler));
-        }
-        nativeClientSend(nativeClientId, queryId, query);
-    }
-
-    /**
-     * Sends a request to the TDLib with an empty ExceptionHandler.
-     *
-     * @param query         Object representing a query to the TDLib.
-     * @param resultHandler Result handler with onResult method which will be called with result
-     *                      of the query or with TdApi.Error as parameter. If it is null, then
-     *                      defaultExceptionHandler will be called.
-     */
-    public void send(TdApi.Function query, ResultHandler resultHandler) {
-        send(query, resultHandler, null);
-    }
-
-    /**
-     * Synchronously executes a TDLib request. Only a few marked accordingly requests can be executed synchronously.
-     *
-     * @param query Object representing a query to the TDLib.
-     * @param <T>   Automatically deduced return type of the query.
-     * @return request result.
-     * @throws ExecutionException if query execution fails.
-     */
-    @SuppressWarnings("unchecked")
-    public static <T extends TdApi.Object> T execute(TdApi.Function<T> query) throws ExecutionException {
-        TdApi.Object object = nativeClientExecute(query);
-        if (object instanceof TdApi.Error) {
-            throw new ExecutionException((TdApi.Error) object);
-        }
-        return (T) object;
-    }
-
-    /**
-     * Creates new Client.
-     *
-     * @param updateHandler           Handler for incoming updates.
-     * @param updateExceptionHandler  Handler for exceptions thrown from updateHandler. If it is null, exceptions will be ignored.
-     * @param defaultExceptionHandler Default handler for exceptions thrown from all ResultHandler. If it is null, exceptions will be ignored.
-     * @return created Client
-     */
-    public static Client create(ResultHandler updateHandler, ExceptionHandler updateExceptionHandler, ExceptionHandler defaultExceptionHandler) {
-        Client client = new Client(updateHandler, updateExceptionHandler, defaultExceptionHandler);
-        synchronized (responseReceiver) {
-            if (!responseReceiver.isRun) {
-                responseReceiver.isRun = true;
-
-                Thread receiverThread = new Thread(responseReceiver, "TDLib thread");
-                receiverThread.setDaemon(true);
-                receiverThread.start();
-            }
-        }
-        return client;
-    }
-
-    /**
-     * Sets the handler for messages that are added to the internal TDLib log.
-     * None of the TDLib methods can be called from the callback.
-     *
-     * @param maxVerbosityLevel The maximum verbosity level of messages for which the callback will be called.
-     * @param logMessageHandler Handler for messages that are added to the internal TDLib log. Pass null to remove the handler.
-     */
-    public static void setLogMessageHandler(int maxVerbosityLevel, Client.LogMessageHandler logMessageHandler) {
-        nativeClientSetLogMessageHandler(maxVerbosityLevel, logMessageHandler);
-    }
-
     private static class ResponseReceiver implements Runnable {
+        private static final int MAX_EVENTS = 1000;
+        private final int[] clientIds = new int[MAX_EVENTS];
+        private final long[] eventIds = new long[MAX_EVENTS];
+        private final TdApi.Object[] events = new TdApi.Object[MAX_EVENTS];
         public boolean isRun = false;
 
         @Override
@@ -211,22 +245,7 @@ public final class Client {
                 clientCount.decrementAndGet();
             }
         }
-
-        private static final int MAX_EVENTS = 1000;
-        private final int[] clientIds = new int[MAX_EVENTS];
-        private final long[] eventIds = new long[MAX_EVENTS];
-        private final TdApi.Object[] events = new TdApi.Object[MAX_EVENTS];
     }
-
-    private final int nativeClientId;
-
-    private static final ConcurrentHashMap<Integer, ExceptionHandler> defaultExceptionHandlers = new ConcurrentHashMap<Integer, ExceptionHandler>();
-    private static final ConcurrentHashMap<Integer, Handler> updateHandlers = new ConcurrentHashMap<Integer, Handler>();
-    private static final ConcurrentHashMap<Long, Handler> handlers = new ConcurrentHashMap<Long, Handler>();
-    private static final AtomicLong currentQueryId = new AtomicLong();
-    private static final AtomicLong clientCount = new AtomicLong();
-
-    private static final ResponseReceiver responseReceiver = new ResponseReceiver();
 
     private static class Handler {
         final ResultHandler resultHandler;
@@ -237,26 +256,4 @@ public final class Client {
             this.exceptionHandler = exceptionHandler;
         }
     }
-
-    private Client(ResultHandler updateHandler, ExceptionHandler updateExceptionHandler, ExceptionHandler defaultExceptionHandler) {
-        clientCount.incrementAndGet();
-        nativeClientId = createNativeClient();
-        if (updateHandler != null) {
-            updateHandlers.put(nativeClientId, new Handler(updateHandler, updateExceptionHandler));
-        }
-        if (defaultExceptionHandler != null) {
-            defaultExceptionHandlers.put(nativeClientId, defaultExceptionHandler);
-        }
-        send(new TdApi.GetOption("version"), null, null);
-    }
-
-    private static native int createNativeClient();
-
-    private static native void nativeClientSend(int nativeClientId, long eventId, TdApi.Function function);
-
-    private static native int nativeClientReceive(int[] clientIds, long[] eventIds, TdApi.Object[] events, double timeout);
-
-    private static native TdApi.Object nativeClientExecute(TdApi.Function function);
-
-    private static native void nativeClientSetLogMessageHandler(int maxVerbosityLevel, LogMessageHandler logMessageHandler);
 }

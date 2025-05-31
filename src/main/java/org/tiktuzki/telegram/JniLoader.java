@@ -22,8 +22,9 @@ public class JniLoader {
         } else if (Utils.isMac()) {
             dbrNativeLibraryPath = "/org/tiktuzki/telegram/native/macos";
         }
-
-        if (JniLoader.class.getResource(dbrNativeLibraryPath + "/" + dbrNativeLibraryName) == null) {
+        String resourcePath = dbrNativeLibraryPath + "/" + dbrNativeLibraryName;
+        System.out.println("Loading jni: " + resourcePath);
+        if (JniLoader.class.getResource(resourcePath) == null) {
             throw new Exception("Error loading native library: " + dbrNativeLibraryPath + "/" + dbrNativeLibraryName);
         }
 
@@ -37,9 +38,9 @@ public class JniLoader {
     static boolean extractResourceFiles(String dbrNativeLibraryPath, String dbrNativeLibraryName, String tempFolder) throws IOException {
         String[] filenames = null;
         if (Utils.isWindows()) {
-            filenames = new String[]{};
+            filenames = new String[]{"libtdjni.dll"};
         } else if (Utils.isLinux()) {
-            filenames = new String[]{};
+            filenames = new String[]{"libtdjni.so"};
         } else if (Utils.isMac()) {
             filenames = new String[]{"libtdjni.dylib"};
         }
@@ -137,34 +138,4 @@ public class JniLoader {
         }
     }
 
-
-//    public static void loadTdLib() throws IOException {
-//        loadNativeLibraryFromResource();
-//    }
-//
-//    public static void loadNativeLibraryFromResource() throws IOException {
-//        loadNativeLibraryFromResource("libtdjni.dylib", "libtdjni", ".dylib");
-//    }
-//
-//    public static void loadNativeLibraryFromResource(
-//            String resourcePath,
-//            String libPrefix,
-//            String libSuffix
-//    ) throws IOException {
-//        InputStream inputStream = JniLoader.class.getResourceAsStream(resourcePath);
-//        if (inputStream == null) {
-//            throw new IOException("Resource " + resourcePath + " not found");
-//        }
-//        File temp = File.createTempFile(libPrefix, libSuffix);
-//        temp.deleteOnExit();
-//        try (InputStream input = inputStream;
-//             FileOutputStream output = new FileOutputStream(temp)) {
-//            byte[] buffer = new byte[8192];
-//            int bytesRead;
-//            while ((bytesRead = input.read(buffer)) != -1) {
-//                output.write(buffer, 0, bytesRead);
-//            }
-//        }
-//        System.load(temp.getAbsolutePath());
-//    }
 }

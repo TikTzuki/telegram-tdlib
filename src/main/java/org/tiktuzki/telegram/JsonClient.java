@@ -6,8 +6,6 @@
 //
 package org.tiktuzki.telegram;
 
-import java.io.IOException;
-
 /**
  * Main class for interaction with the TDLib using JSON interface.
  */
@@ -19,6 +17,12 @@ public final class JsonClient {
         } catch (Exception e) {
             System.err.println("Native code library failed to load.\n" + e);
         }
+    }
+
+    /**
+     * The class can't be instantiated.
+     */
+    private JsonClient() {
     }
 
     /**
@@ -55,6 +59,15 @@ public final class JsonClient {
     public static native String execute(String request);
 
     /**
+     * Sets the handler for messages that are added to the internal TDLib log.
+     * None of the TDLib methods can be called from the callback.
+     *
+     * @param maxVerbosityLevel The maximum verbosity level of messages for which the callback will be called.
+     * @param logMessageHandler Handler for messages that are added to the internal TDLib log. Pass null to remove the handler.
+     */
+    public static native void setLogMessageHandler(int maxVerbosityLevel, JsonClient.LogMessageHandler logMessageHandler);
+
+    /**
      * Interface for handler of messages that are added to the internal TDLib log.
      */
     public interface LogMessageHandler {
@@ -67,20 +80,5 @@ public final class JsonClient {
          * @param message        The message added to the internal TDLib log.
          */
         void onLogMessage(int verbosityLevel, String message);
-    }
-
-    /**
-     * Sets the handler for messages that are added to the internal TDLib log.
-     * None of the TDLib methods can be called from the callback.
-     *
-     * @param maxVerbosityLevel The maximum verbosity level of messages for which the callback will be called.
-     * @param logMessageHandler Handler for messages that are added to the internal TDLib log. Pass null to remove the handler.
-     */
-    public static native void setLogMessageHandler(int maxVerbosityLevel, JsonClient.LogMessageHandler logMessageHandler);
-
-    /**
-     * The class can't be instantiated.
-     */
-    private JsonClient() {
     }
 }

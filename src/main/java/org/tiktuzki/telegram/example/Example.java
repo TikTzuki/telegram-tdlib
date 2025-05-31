@@ -26,33 +26,26 @@ import java.util.concurrent.locks.ReentrantLock;
  * Example class for TDLib usage from Java.
  */
 public final class Example {
-    private static Client client = null;
-
-    private static TdApi.AuthorizationState authorizationState = null;
-    private static volatile boolean haveAuthorization = false;
-    private static volatile boolean needQuit = false;
-    private static volatile boolean canQuit = false;
-
     private static final Client.ResultHandler defaultHandler = new DefaultHandler();
-
     private static final Lock authorizationLock = new ReentrantLock();
     private static final Condition gotAuthorization = authorizationLock.newCondition();
-
     private static final ConcurrentMap<Long, TdApi.User> users = new ConcurrentHashMap<Long, TdApi.User>();
     private static final ConcurrentMap<Long, TdApi.BasicGroup> basicGroups = new ConcurrentHashMap<Long, TdApi.BasicGroup>();
     private static final ConcurrentMap<Long, TdApi.Supergroup> supergroups = new ConcurrentHashMap<Long, TdApi.Supergroup>();
     private static final ConcurrentMap<Integer, TdApi.SecretChat> secretChats = new ConcurrentHashMap<Integer, TdApi.SecretChat>();
-
     private static final ConcurrentMap<Long, TdApi.Chat> chats = new ConcurrentHashMap<Long, TdApi.Chat>();
     private static final NavigableSet<OrderedChat> mainChatList = new TreeSet<OrderedChat>();
-    private static boolean haveFullMainChatList = false;
-
     private static final ConcurrentMap<Long, TdApi.UserFullInfo> usersFullInfo = new ConcurrentHashMap<Long, TdApi.UserFullInfo>();
     private static final ConcurrentMap<Long, TdApi.BasicGroupFullInfo> basicGroupsFullInfo = new ConcurrentHashMap<Long, TdApi.BasicGroupFullInfo>();
     private static final ConcurrentMap<Long, TdApi.SupergroupFullInfo> supergroupsFullInfo = new ConcurrentHashMap<Long, TdApi.SupergroupFullInfo>();
-
     private static final String newLine = System.getProperty("line.separator");
     private static final String commandsLine = "Enter command (gcs - GetChats, gc <chatId> - GetChat, me - GetMe, sm <chatId> <message> - SendMessage, lo - LogOut, q - Quit): ";
+    private static Client client = null;
+    private static TdApi.AuthorizationState authorizationState = null;
+    private static volatile boolean haveAuthorization = false;
+    private static volatile boolean needQuit = false;
+    private static volatile boolean canQuit = false;
+    private static boolean haveFullMainChatList = false;
     private static volatile String currentPrompt = null;
 
     private static void print(String str) {
@@ -328,6 +321,76 @@ public final class Example {
         }
         while (!canQuit) {
             Thread.sleep(1);
+        }
+    }
+
+    private static void onFatalError(String errorMessage) {
+        final class ThrowError implements Runnable {
+            private final String errorMessage;
+            private final AtomicLong errorThrowTime;
+
+            private ThrowError(String errorMessage, AtomicLong errorThrowTime) {
+                this.errorMessage = errorMessage;
+                this.errorThrowTime = errorThrowTime;
+            }
+
+            @Override
+            public void run() {
+                if (isDatabaseBrokenError(errorMessage) || isDiskFullError(errorMessage) || isDiskError(errorMessage)) {
+                    processExternalError();
+                    return;
+                }
+
+                errorThrowTime.set(System.currentTimeMillis());
+                throw new ClientError("TDLib fatal error: " + errorMessage);
+            }
+
+            private void processExternalError() {
+                errorThrowTime.set(System.currentTimeMillis());
+                throw new ExternalClientError("Fatal error: " + errorMessage);
+            }
+
+            private boolean isDatabaseBrokenError(String message) {
+                return message.contains("Wrong key or database is corrupted") ||
+                        message.contains("SQL logic error or missing database") ||
+                        message.contains("database disk image is malformed") ||
+                        message.contains("file is encrypted or is not a database") ||
+                        message.contains("unsupported file format") ||
+                        message.contains("Database was corrupted and deleted during execution and can't be recreated");
+            }
+
+            private boolean isDiskFullError(String message) {
+                return message.contains("PosixError : No space left on device") ||
+                        message.contains("database or disk is full");
+            }
+
+            private boolean isDiskError(String message) {
+                return message.contains("I/O error") || message.contains("Structure needs cleaning");
+            }
+
+            final class ClientError extends Error {
+                private ClientError(String message) {
+                    super(message);
+                }
+            }
+
+            final class ExternalClientError extends Error {
+                public ExternalClientError(String message) {
+                    super(message);
+                }
+            }
+        }
+
+        final AtomicLong errorThrowTime = new AtomicLong(Long.MAX_VALUE);
+        new Thread(new ThrowError(errorMessage, errorThrowTime), "TDLib fatal error thread").start();
+
+        // wait at least 10 seconds after the error is thrown
+        while (errorThrowTime.get() >= System.currentTimeMillis() - 10000) {
+            try {
+                Thread.sleep(1000 /* milliseconds */);
+            } catch (InterruptedException ignore) {
+                Thread.currentThread().interrupt();
+            }
         }
     }
 
@@ -704,76 +767,6 @@ public final class Example {
                 return;
             }
             System.err.println(message);
-        }
-    }
-
-    private static void onFatalError(String errorMessage) {
-        final class ThrowError implements Runnable {
-            private final String errorMessage;
-            private final AtomicLong errorThrowTime;
-
-            private ThrowError(String errorMessage, AtomicLong errorThrowTime) {
-                this.errorMessage = errorMessage;
-                this.errorThrowTime = errorThrowTime;
-            }
-
-            @Override
-            public void run() {
-                if (isDatabaseBrokenError(errorMessage) || isDiskFullError(errorMessage) || isDiskError(errorMessage)) {
-                    processExternalError();
-                    return;
-                }
-
-                errorThrowTime.set(System.currentTimeMillis());
-                throw new ClientError("TDLib fatal error: " + errorMessage);
-            }
-
-            private void processExternalError() {
-                errorThrowTime.set(System.currentTimeMillis());
-                throw new ExternalClientError("Fatal error: " + errorMessage);
-            }
-
-            final class ClientError extends Error {
-                private ClientError(String message) {
-                    super(message);
-                }
-            }
-
-            final class ExternalClientError extends Error {
-                public ExternalClientError(String message) {
-                    super(message);
-                }
-            }
-
-            private boolean isDatabaseBrokenError(String message) {
-                return message.contains("Wrong key or database is corrupted") ||
-                        message.contains("SQL logic error or missing database") ||
-                        message.contains("database disk image is malformed") ||
-                        message.contains("file is encrypted or is not a database") ||
-                        message.contains("unsupported file format") ||
-                        message.contains("Database was corrupted and deleted during execution and can't be recreated");
-            }
-
-            private boolean isDiskFullError(String message) {
-                return message.contains("PosixError : No space left on device") ||
-                        message.contains("database or disk is full");
-            }
-
-            private boolean isDiskError(String message) {
-                return message.contains("I/O error") || message.contains("Structure needs cleaning");
-            }
-        }
-
-        final AtomicLong errorThrowTime = new AtomicLong(Long.MAX_VALUE);
-        new Thread(new ThrowError(errorMessage, errorThrowTime), "TDLib fatal error thread").start();
-
-        // wait at least 10 seconds after the error is thrown
-        while (errorThrowTime.get() >= System.currentTimeMillis() - 10000) {
-            try {
-                Thread.sleep(1000 /* milliseconds */);
-            } catch (InterruptedException ignore) {
-                Thread.currentThread().interrupt();
-            }
         }
     }
 }

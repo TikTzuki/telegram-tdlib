@@ -36,9 +36,18 @@ import org.tiktuzki.telegram.TdClient;
 
 public class Example {
     public static void main(String[] args) {
-        TdClient client = new TdClient();
-        // Initialize and use the client
-        // ...
+        Client.setLogMessageHandler(0, new LogMessageHandler());
+
+        // disable TDLib log and redirect fatal errors and plain log messages to a file
+        try {
+            Client.execute(new TdApi.SetLogVerbosityLevel(0));
+            Client.execute(new TdApi.SetLogStream(new TdApi.LogStreamFile("tdlib.log", 1 << 27, false)));
+        } catch (Client.ExecutionException error) {
+            throw new IOError(new IOException("Write access to the current directory is required"));
+        }
+
+        // create client
+        client = Client.create(new UpdateHandler(), null, null);
     }
 }
 ```
@@ -57,3 +66,6 @@ Pull requests and issues are welcome! Please open an issue to discuss your ideas
 - [Telegram TDLib](https://docs.tiktuzki.com/telegram-tdlib)
 - Inspired by the open-source Telegram community
 
+# Test is jni work
+javac -cp build/libs/telegram-tdlib.jar Test.java \
+java -cp build/libs/telegram-tdlib.jar:. Test
