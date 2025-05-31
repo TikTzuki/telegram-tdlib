@@ -1,0 +1,5 @@
+**/*build/
+/bin/
+/docs/
+/org/tiktuzki/telegram/TdApi.java
+/td/

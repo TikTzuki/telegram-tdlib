@@ -1,0 +1,34 @@
+plugins {
+    id 'java-library'
+    id 'maven-publish'
+}
+repositories {
+    mavenCentral()
+}
+java {
+    toolchain {
+        languageVersion = JavaLanguageVersion.of(21)
+    }
+}
+dependencies {
+}
+publishing {
+    repositories {
+        maven {
+            name = "repositoryLite"
+            url = "https://reposilite.tiktuzki.com/releases"
+            credentials(PasswordCredentials)
+            authentication {
+                basic(BasicAuthentication)
+            }
+        }
+    }
+    publications {
+        maven(MavenPublication) {
+            groupId = "org.tiktuzki"
+            artifactId = "telegram-tdlib"
+            version = "1.0.0"
+            from components.java
+        }
+    }
+}
